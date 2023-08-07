@@ -8,16 +8,22 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 )
 
+const defaultSaveInterval = 10 * time.Second
+
 type KeyValueStore struct {
-	data  map[string]interface{}
-	mutex sync.RWMutex
+	data      map[string]interface{}
+	mutex     sync.RWMutex
+	savePath  string
+	lastSaved time.Time
 }
 
-func NewKeyValueStore() *KeyValueStore {
+func NewKeyValueStore(savePath string) *KeyValueStore {
 	return &KeyValueStore{
-		data: make(map[string]interface{}),
+		data:     make(map[string]interface{}),
+		savePath: savePath,
 	}
 }
 
@@ -34,6 +40,7 @@ func (store *KeyValueStore) Set(key string, value interface{}) {
 	defer store.mutex.Unlock()
 
 	store.data[key] = value
+	store.checkAndPersist()
 }
 
 func (store *KeyValueStore) Delete(key string) {
@@ -41,6 +48,14 @@ func (store *KeyValueStore) Delete(key string) {
 	defer store.mutex.Unlock()
 
 	delete(store.data, key)
+	store.checkAndPersist()
+}
+
+func (store *KeyValueStore) checkAndPersist() {
+	if time.Since(store.lastSaved) > defaultSaveInterval {
+		store.SaveToFile(store.savePath)
+		store.lastSaved = time.Now()
+	}
 }
 
 func (store *KeyValueStore) SaveToFile(filename string) error {
@@ -54,11 +69,7 @@ func (store *KeyValueStore) SaveToFile(filename string) error {
 	defer file.Close()
 
 	encoder := json.NewEncoder(file)
-	if err := encoder.Encode(store.data); err != nil {
-		return err
-	}
-
-	return nil
+	return encoder.Encode(store.data)
 }
 
 func (store *KeyValueStore) LoadFromFile(filename string) error {
@@ -76,61 +87,51 @@ func (store *KeyValueStore) LoadFromFile(filename string) error {
 		return err
 	}
 
-	if err := json.Unmarshal(data, &store.data); err != nil {
-		return err
-	}
-
-	return nil
+	return json.Unmarshal(data, &store.data)
 }
 
 func main() {
-	store := NewKeyValueStore()
+	savePath := "data.json"
+	store := NewKeyValueStore(savePath)
 
-	// Example usage
-	store.Set("key1", "value1")
-	store.Set("key2", "value2")
-
-	value, ok := store.Get("key1")
-	if ok {
-		fmt.Println("Value:", value)
-	} else {
-		fmt.Println("Key not found")
-	}
-
-	store.Delete("key2")
-
-	err := store.SaveToFile("data.json")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	err = store.LoadFromFile("data.json")
-	if err != nil {
+	// Load existing data
+	err := store.LoadFromFile(savePath)
+	if err != nil && !os.IsNotExist(err) {
 		log.Fatal(err)
 	}
 
 	// Start HTTP server to expose the key-value store
-	http.HandleFunc("/get", func(w http.ResponseWriter, r *http.Request) {
-		key := r.URL.Query().Get("key")
-		value, ok := store.Get(key)
-		if ok {
-			fmt.Fprintf(w, "Value: %v", value)
-		} else {
-			fmt.Fprintf(w, "Key not found")
+	http.HandleFunc("/store/", func(w http.ResponseWriter, r *http.Request) {
+		key := r.URL.Path[len("/store/"):]
+		switch r.Method {
+		case http.MethodGet:
+			value, ok := store.Get(key)
+			if !ok {
+				http.Error(w, "Key not found", http.StatusNotFound)
+				return
+			}
+			fmt.Fprintf(w, "%v", value)
+
+		case http.MethodPost:
+			value := r.FormValue("value")
+			if value == "" {
+				http.Error(w, "No value provided", http.StatusBadRequest)
+				return
+			}
+			store.Set(key, value)
+			fmt.Fprintf(w, "Key-Value set successfully")
+
+		case http.MethodDelete:
+			store.Delete(key)
+			fmt.Fprintf(w, "Key deleted successfully")
+
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
 
-	http.HandleFunc("/set", func(w http.ResponseWriter, r *http.Request) {
-		key := r.URL.Query().Get("key")
-		value := r.URL.Query().Get("value")
-		store.Set(key, value)
-		fmt.Fprintf(w, "Key-Value set successfully")
-	})
-
-	http.HandleFunc("/delete", func(w http.ResponseWriter, r *http.Request) {
-		key := r.URL.Query().Get("key")
-		store.Delete(key)
-		fmt.Fprintf(w, "Key deleted successfully")
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "Healthy")
 	})
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
