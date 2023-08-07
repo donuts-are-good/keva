@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -11,7 +12,11 @@ import (
 	"time"
 )
 
-const defaultSaveInterval = 10 * time.Second
+var (
+	port         = flag.String("port", ":8080", "Define the server port")
+	saveFilePath = flag.String("savepath", "data.json", "Define the path to save the key-value store data")
+	saveInterval = flag.Duration("saveinterval", 10*time.Second, "Define the interval to automatically save data")
+)
 
 type KeyValueStore struct {
 	data      map[string]interface{}
@@ -52,7 +57,7 @@ func (store *KeyValueStore) Delete(key string) {
 }
 
 func (store *KeyValueStore) checkAndPersist() {
-	if time.Since(store.lastSaved) > defaultSaveInterval {
+	if time.Since(store.lastSaved) > *saveInterval {
 		store.SaveToFile(store.savePath)
 		store.lastSaved = time.Now()
 	}
@@ -91,16 +96,15 @@ func (store *KeyValueStore) LoadFromFile(filename string) error {
 }
 
 func main() {
-	savePath := "data.json"
-	store := NewKeyValueStore(savePath)
+	flag.Parse()
 
-	// Load existing data
-	err := store.LoadFromFile(savePath)
+	store := NewKeyValueStore(*saveFilePath)
+
+	err := store.LoadFromFile(*saveFilePath)
 	if err != nil && !os.IsNotExist(err) {
 		log.Fatal(err)
 	}
 
-	// Start HTTP server to expose the key-value store
 	http.HandleFunc("/store/", func(w http.ResponseWriter, r *http.Request) {
 		key := r.URL.Path[len("/store/"):]
 		switch r.Method {
@@ -134,5 +138,6 @@ func main() {
 		fmt.Fprint(w, "Healthy")
 	})
 
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Printf("Starting server on %s\n", *port)
+	log.Fatal(http.ListenAndServe(*port, nil))
 }
