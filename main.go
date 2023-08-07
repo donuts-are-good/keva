@@ -62,7 +62,7 @@ func main() {
 			}
 			store.Set(key, value)
 			w.WriteHeader(http.StatusCreated)
-			fmt.Fprintf(w, "Key-Value set successfully")
+			fmt.Fprintf(w, "OK")
 
 		case http.MethodDelete:
 			_, exists := store.Get(key)
@@ -71,7 +71,7 @@ func main() {
 				return
 			}
 			store.Delete(key)
-			fmt.Fprintf(w, "Key deleted successfully")
+			fmt.Fprintf(w, "OK")
 
 		default:
 			w.Header().Set("Allow", "GET, POST, DELETE")
