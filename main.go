@@ -15,94 +15,25 @@ import (
 var (
 	port         = flag.String("port", ":8080", "Define the server port")
 	saveFilePath = flag.String("savepath", "data.json", "Define the path to save the key-value store data")
-	saveInterval = flag.Duration("saveinterval", 10*time.Second, "Define the interval to automatically save data")
+	saveInterval = flag.Duration("saveinterval", 5*time.Second, "Define the interval to automatically save data")
 )
 
 type KeyValueStore struct {
-	data      map[string]interface{}
-	mutex     sync.RWMutex
-	savePath  string
-	lastSaved time.Time
-}
-
-func NewKeyValueStore(savePath string) *KeyValueStore {
-	return &KeyValueStore{
-		data:     make(map[string]interface{}),
-		savePath: savePath,
-	}
-}
-
-func (store *KeyValueStore) Get(key string) (interface{}, bool) {
-	store.mutex.RLock()
-	defer store.mutex.RUnlock()
-
-	value, ok := store.data[key]
-	return value, ok
-}
-
-func (store *KeyValueStore) Set(key string, value interface{}) {
-	store.mutex.Lock()
-	defer store.mutex.Unlock()
-
-	store.data[key] = value
-	store.checkAndPersist()
-}
-
-func (store *KeyValueStore) Delete(key string) {
-	store.mutex.Lock()
-	defer store.mutex.Unlock()
-
-	delete(store.data, key)
-	store.checkAndPersist()
-}
-
-func (store *KeyValueStore) checkAndPersist() {
-	if time.Since(store.lastSaved) > *saveInterval {
-		store.SaveToFile(store.savePath)
-		store.lastSaved = time.Now()
-	}
-}
-
-func (store *KeyValueStore) SaveToFile(filename string) error {
-	store.mutex.RLock()
-	defer store.mutex.RUnlock()
-
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
-	return encoder.Encode(store.data)
-}
-
-func (store *KeyValueStore) LoadFromFile(filename string) error {
-	store.mutex.Lock()
-	defer store.mutex.Unlock()
-
-	file, err := os.Open(filename)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return err
-	}
-
-	return json.Unmarshal(data, &store.data)
+	data         map[string]interface{}
+	mutex        sync.RWMutex
+	savePath     string
+	lastSaved    time.Time
+	saveInterval time.Duration
 }
 
 func main() {
 	flag.Parse()
 
-	store := NewKeyValueStore(*saveFilePath)
+	store := NewKeyValueStore(*saveFilePath, *saveInterval)
 
 	err := store.LoadFromFile(*saveFilePath)
 	if err != nil && !os.IsNotExist(err) {
-		log.Fatal(err)
+		log.Fatalf("Fatal error during loading: %v", err)
 	}
 
 	http.HandleFunc("/store/", func(w http.ResponseWriter, r *http.Request) {
@@ -140,4 +71,111 @@ func main() {
 
 	log.Printf("Starting server on %s\n", *port)
 	log.Fatal(http.ListenAndServe(*port, nil))
+}
+
+func NewKeyValueStore(savePath string, saveInterval time.Duration) *KeyValueStore {
+	log.Println("Initializing new key-value store...")
+	kvStore := &KeyValueStore{
+		data:         make(map[string]interface{}),
+		savePath:     savePath,
+		saveInterval: saveInterval,
+	}
+	go kvStore.periodicPersist()
+	return kvStore
+}
+
+func (store *KeyValueStore) Get(key string) (interface{}, bool) {
+	store.mutex.RLock()
+	defer store.mutex.RUnlock()
+
+	value, ok := store.data[key]
+	return value, ok
+}
+
+func (store *KeyValueStore) Set(key string, value interface{}) {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	store.data[key] = value
+}
+
+func (store *KeyValueStore) Delete(key string) {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	delete(store.data, key)
+}
+
+func (store *KeyValueStore) periodicPersist() {
+	for {
+		time.Sleep(store.saveInterval)
+		if time.Since(store.lastSaved) > store.saveInterval {
+			store.persist()
+		}
+	}
+}
+
+func (store *KeyValueStore) persist() {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	err := store.SaveToFile(store.savePath)
+	if err != nil {
+		log.Printf("Error during persistence: %v", err)
+	}
+	store.lastSaved = time.Now()
+}
+
+func (store *KeyValueStore) SaveToFile(filename string) error {
+
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Printf("Error creating file: %v", err)
+		return err
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	err = encoder.Encode(store.data)
+	if err != nil {
+		log.Printf("Error encoding data to file: %v", err)
+	}
+	return err
+}
+
+func (store *KeyValueStore) LoadFromFile(filename string) error {
+	log.Printf("Loading from file: %s", filename)
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	if _, err := os.Stat(filename); os.IsNotExist(err) {
+		log.Println("Initializing datastore...")
+		file, createErr := os.Create(filename)
+		if createErr != nil {
+			log.Printf("Error creating new file: %v", createErr)
+			return createErr
+		}
+		file.WriteString("{}")
+		file.Close()
+		return nil
+	}
+
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Printf("Error opening file: %v", err)
+		return err
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		log.Printf("Error reading from file: %v", err)
+		return err
+	}
+
+	err = json.Unmarshal(data, &store.data)
+	if err != nil {
+		log.Printf("Error unmarshalling data: %v", err)
+	}
+	return err
 }
