@@ -45,27 +45,42 @@ func main() {
 				http.Error(w, "Key not found", http.StatusNotFound)
 				return
 			}
-			fmt.Fprintf(w, "%v", value)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(value)
 
 		case http.MethodPost:
-			value := r.FormValue("value")
-			if value == "" {
+			var inputData map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&inputData); err != nil {
+				http.Error(w, "Bad Request", http.StatusBadRequest)
+				return
+			}
+
+			value, ok := inputData["value"]
+			if !ok || value == "" {
 				http.Error(w, "No value provided", http.StatusBadRequest)
 				return
 			}
 			store.Set(key, value)
+			w.WriteHeader(http.StatusCreated)
 			fmt.Fprintf(w, "Key-Value set successfully")
 
 		case http.MethodDelete:
+			_, exists := store.Get(key)
+			if !exists {
+				http.Error(w, "Key not found", http.StatusNotFound)
+				return
+			}
 			store.Delete(key)
 			fmt.Fprintf(w, "Key deleted successfully")
 
 		default:
+			w.Header().Set("Allow", "GET, POST, DELETE")
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprint(w, "Healthy")
 	})
 

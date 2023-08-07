@@ -1,0 +1,91 @@
+openapi: 3.0.3
+info:
+  title: KeVa API
+  version: 1.0.0
+  description: A key-value store API.
+servers:
+  - url: http://localhost:8080
+
+paths:
+  /store/{key}:
+    get:
+      summary: Retrieve a value by key.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: The key associated with the stored value.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Value retrieved successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          description: Key not found.
+
+    post:
+      summary: Store a value with a key.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: The key to store the value with.
+          schema:
+            type: string
+      requestBody:
+        description: JSON object containing the value to store.
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value:
+                  type: string
+      responses:
+        '201':
+          description: Key-value set successfully.
+        '400':
+          description: No value provided or bad request format.
+
+    delete:
+      summary: Delete a key-value pair.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: The key to delete.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Key deleted successfully.
+        '404':
+          description: Key not found.
+
+  /health:
+    get:
+      summary: Health check.
+      responses:
+        '200':
+          description: Healthy.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Healthy
+
+components:
+  parameters:
+    key:
+      name: key
+      in: path
+      description: Key used for storing the value.
+      required: true
+      schema:
+        type: string
