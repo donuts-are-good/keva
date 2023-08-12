@@ -80,7 +80,6 @@ to better understand the usage of `keva`, here's a series of `curl` commands to 
 
 **output:**
 
-mathematica
 
 `key not found`
 
