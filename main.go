@@ -46,7 +46,9 @@ func main() {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(value)
+			if err := json.NewEncoder(w).Encode(value); err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			}
 
 		case http.MethodPost:
 			var inputData map[string]interface{}
@@ -56,7 +58,7 @@ func main() {
 			}
 
 			value, ok := inputData["value"]
-			if !ok || value == "" {
+			if !ok {
 				http.Error(w, "No value provided", http.StatusBadRequest)
 				return
 			}
@@ -94,6 +96,7 @@ func NewKeyValueStore(savePath string, saveInterval time.Duration) *KeyValueStor
 		data:         make(map[string]interface{}),
 		savePath:     savePath,
 		saveInterval: saveInterval,
+		lastSaved:    time.Now(),
 	}
 	go kvStore.periodicPersist()
 	return kvStore
@@ -142,7 +145,6 @@ func (store *KeyValueStore) persist() {
 }
 
 func (store *KeyValueStore) SaveToFile(filename string) error {
-
 	file, err := os.Create(filename)
 	if err != nil {
 		log.Printf("Error creating file: %v", err)
